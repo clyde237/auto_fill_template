@@ -93,6 +93,23 @@ def parse_pasted_text(text: str) -> list:
 
 
 # ─────────────────────────────────────────────
+# CONVERSION DOCX → PDF (Windows / Microsoft Word)
+# ─────────────────────────────────────────────
+def convert_docx_to_pdf(docx_path: str, pdf_path: str) -> bool:
+    try:
+        import win32com.client
+        word = win32com.client.Dispatch("Word.Application")
+        word.Visible = False
+        doc = word.Documents.Open(os.path.abspath(docx_path))
+        doc.SaveAs(os.path.abspath(pdf_path), FileFormat=17)  # wdFormatPDF
+        doc.Close()
+        word.Quit()
+        return True
+    except Exception:
+        return False
+
+
+# ─────────────────────────────────────────────
 # REMPLISSAGE DU DOCUMENT
 # ─────────────────────────────────────────────
 def fill_document(values: list, output_path: str):
@@ -352,31 +369,55 @@ if generate:
         if len(values) >= 5:
             with st.spinner("⏳ Génération en cours..."):
                 try:
-                    tmp_out = tempfile.mktemp(suffix=".docx")
-                    fill_document(values, tmp_out)
+                    tmp_docx = tempfile.mktemp(suffix=".docx")
+                    tmp_pdf = tempfile.mktemp(suffix=".pdf")
+                    fill_document(values, tmp_docx)
 
-                    with open(tmp_out, "rb") as f:
-                        doc_bytes = f.read()
-                    os.unlink(tmp_out)
+                    with open(tmp_docx, "rb") as f:
+                        docx_bytes = f.read()
+
+                    pdf_ok = convert_docx_to_pdf(tmp_docx, tmp_pdf)
+                    if pdf_ok:
+                        with open(tmp_pdf, "rb") as f:
+                            pdf_bytes = f.read()
+
+                    os.unlink(tmp_docx)
+                    if pdf_ok:
+                        os.unlink(tmp_pdf)
 
                     nom = values[2] if len(values) > 2 else "agent"
                     matricule = values[1] if len(values) > 1 else "XXX"
                     safe_nom = re.sub(r'[^A-Za-z0-9]', '_', nom.upper())[:30]
-                    filename = f"Canevas_{matricule}_{safe_nom}.docx"
+                    docx_filename = f"Canevas_{matricule}_{safe_nom}.docx"
+                    pdf_filename = f"Canevas_{matricule}_{safe_nom}.pdf"
 
                     st.markdown(
                         '<div class="success-box">✅ <b>Document généré avec succès !</b> '
                         'Téléchargez-le ci-dessous.</div>',
                         unsafe_allow_html=True
                     )
-                    st.download_button(
-                        label="⬇️ Télécharger le document Word (.docx)",
-                        data=doc_bytes,
-                        file_name=filename,
-                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                        type="primary",
-                        use_container_width=True,
-                    )
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.download_button(
+                            label="⬇️ Word (.docx)",
+                            data=docx_bytes,
+                            file_name=docx_filename,
+                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                            type="primary",
+                            use_container_width=True,
+                        )
+                    with col2:
+                        if pdf_ok:
+                            st.download_button(
+                                label="📄 PDF (.pdf)",
+                                data=pdf_bytes,
+                                file_name=pdf_filename,
+                                mime="application/pdf",
+                                type="primary",
+                                use_container_width=True,
+                            )
+                        else:
+                            st.info("ℹ️ PDF indisponible (installer pywin32)", icon="⚠️")
                 except Exception as e:
                     st.error(f"❌ Erreur : {e}")
                     st.exception(e)
