@@ -93,20 +93,69 @@ def parse_pasted_text(text: str) -> list:
 
 
 # ─────────────────────────────────────────────
-# CONVERSION DOCX → PDF (Windows / Microsoft Word)
+# CONVERSION DOCX → PDF (LibreOffice headless — compatible Linux/Streamlit Cloud)
 # ─────────────────────────────────────────────
+import subprocess
+import shutil as _shutil
+
+
+def _find_soffice_binary():
+    """Détecte le binaire LibreOffice disponible sur le système."""
+    for name in ("soffice", "libreoffice"):
+        path = _shutil.which(name)
+        if path:
+            return path
+    return None
+
+
 def convert_docx_to_pdf(docx_path: str, pdf_path: str) -> bool:
+    """
+    Convertit un .docx en .pdf via LibreOffice en mode headless.
+    Fonctionne sur Linux (Streamlit Cloud, serveurs) sans dépendance Windows.
+    """
+    soffice_bin = _find_soffice_binary()
+    if not soffice_bin:
+        return False
+
+    docx_path = os.path.abspath(docx_path)
+    out_dir = os.path.dirname(os.path.abspath(pdf_path))
+    expected_pdf = os.path.join(
+        out_dir, os.path.splitext(os.path.basename(docx_path))[0] + ".pdf"
+    )
+
+    # Profil utilisateur isolé pour éviter les conflits entre exécutions concurrentes
+    user_profile_dir = tempfile.mkdtemp(prefix="lo_profile_")
+
     try:
-        import win32com.client
-        word = win32com.client.Dispatch("Word.Application")
-        word.Visible = False
-        doc = word.Documents.Open(os.path.abspath(docx_path))
-        doc.SaveAs(os.path.abspath(pdf_path), FileFormat=17)  # wdFormatPDF
-        doc.Close()
-        word.Quit()
-        return True
+        result = subprocess.run(
+            [
+                soffice_bin,
+                "--headless",
+                "--norestore",
+                "--invisible",
+                "--nodefault",
+                "--nofirststartwizard",
+                "--nolockcheck",
+                f"-env:UserInstallation=file://{user_profile_dir}",
+                "--convert-to", "pdf",
+                "--outdir", out_dir,
+                docx_path,
+            ],
+            capture_output=True,
+            timeout=90,
+        )
+        if result.returncode != 0:
+            return False
+
+        if os.path.exists(expected_pdf):
+            if expected_pdf != os.path.abspath(pdf_path):
+                _shutil.move(expected_pdf, pdf_path)
+            return os.path.exists(pdf_path)
+        return False
     except Exception:
         return False
+    finally:
+        _shutil.rmtree(user_profile_dir, ignore_errors=True)
 
 
 # ─────────────────────────────────────────────
@@ -417,7 +466,11 @@ if generate:
                                 use_container_width=True,
                             )
                         else:
-                            st.info("ℹ️ PDF indisponible (installer pywin32)", icon="⚠️")
+                            st.info(
+                                "ℹ️ PDF indisponible — LibreOffice n'a pas pu convertir le document. "
+                                "Le fichier Word reste téléchargeable ci-dessus.",
+                                icon="⚠️"
+                            )
                 except Exception as e:
                     st.error(f"❌ Erreur : {e}")
                     st.exception(e)
